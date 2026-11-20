@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>仕様書確認一覧エディタ</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --text: #1f2328; --muted: #656d76; --line: #d0d7de;
+      --accent: #0969da; --accent-weak: #ddf4ff;
+      --err: #cf222e; --err-bg: #ffebe9; --warn: #9a6700; --warn-bg: #fff8c5; --info: #57606a; --info-bg: #eaeef2;
+      --ok: #1a7f37; --ok-bg: #dafbe1; --dirty: #fff8c5;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+    header { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    header h1 { margin: 0; font-size: 18px; }
+    header .spacer { flex: 1; }
+    button, .button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+    button:hover:not(:disabled), .button:hover { background: var(--bg); }
+    .primary { background: var(--accent) !important; border-color: var(--accent); color: #fff !important; }
+    .primary:hover:not(:disabled) { filter: brightness(1.1); }
+    button:disabled { opacity: .45; cursor: default; }
+    #fileInput { display: none; }
+    main { padding: 16px; }
+    .notice { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 16px; }
+    .notice.error { border-color: var(--err); background: var(--err-bg); }
+    .notice ol { margin: 4px 0 0; padding-left: 20px; }
+    #drop { padding: 32px 16px; border: 2px dashed var(--line); text-align: center; }
+    body.dragging #drop, body.dragging .table-wrap { border-color: var(--accent); background: var(--accent-weak); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+    .tabs button.active { background: var(--accent-weak); border-color: var(--accent); font-weight: bold; }
+    .meta { display: flex; flex-wrap: wrap; gap: 4px 24px; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { padding: 2px 10px; border-radius: 999px; background: var(--info-bg); font-size: 12px; }
+    .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; min-width: 1200px; }
+    th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: var(--bg); font-size: 12px; white-space: nowrap; }
+    th.edit { background: var(--accent-weak); }
+    td.no { text-align: center; width: 40px; }
+    td.small { width: 72px; white-space: nowrap; }
+    td.edit-status { width: 200px; min-width: 200px; }
+    td.edit-content { width: 26%; }
+    tr.dirty td { background: var(--dirty); }
+    tr.locked td { color: var(--muted); }
+    tr.hidden { display: none; }
+    .sev { display: inline-block; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .sev.err { color: var(--err); background: var(--err-bg); }
+    .sev.warn { color: var(--warn); background: var(--warn-bg); }
+    .sev.info { color: var(--info); background: var(--info-bg); }
+    select, textarea { width: 100%; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text); }
+    textarea { min-height: 64px; resize: vertical; }
+    select:disabled, textarea:disabled { background: var(--bg); }
+    .status-ok { color: var(--ok); font-weight: bold; }
+    .status-ng { color: var(--err); font-weight: bold; }
+    .ng-proposal { color: var(--err); }
+    #message { min-height: 1.6em; font-size: 13px; }
+    #message.ok { color: var(--ok); }
+    #message.err { color: var(--err); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>仕様書確認一覧エディタ</h1>
+    <label class="button primary" for="fileInput">ファイルを開く</label>
+    <input type="file" id="fileInput" accept=".md" multiple>
+    <span class="spacer"></span>
+    <span id="message" role="status"></span>
+    <button id="save" class="primary" disabled>保存（ダウンロード）</button>
+  </header>
+
+  <main>
+    <div id="status" class="notice" hidden></div>
+    <div id="intro" class="notice">
+      <div id="drop">
+        <b>spec-reviews フォルダの確認一覧（例：SCR-01_qa.md）をここにドラッグ＆ドロップ</b><br>
+        または「ファイルを開く」から選択（Ctrl を押しながら選ぶと複数まとめて開けます）
+      </div>
+      <b>使い方</b>
+      <ol>
+        <li>確認一覧の md を開く。</li>
+        <li><b>修正内容</b> を入力する（修正状態は自動で「修正済AI未確認」になる）。</li>
+        <li>「保存（ダウンロード）」を押す → 作り直した md がダウンロードされる。</li>
+        <li>ダウンロードした md を <code>spec-reviews</code> フォルダの同名ファイルに上書きする。</li>
+        <li>Claude Code で <code>/check-spec</code> を実行する → AI が AI確認OK／AI確認NG を付ける。</li>
+      </ol>
+      <small>ヒント：ブラウザの設定で「ダウンロード時に保存場所を毎回確認する」をオンにすると、保存時に spec-reviews を選んで直接上書きできます。</small>
+    </div>
+    <nav id="tabs" class="tabs"></nav>
+    <section id="view" hidden>
+      <div id="meta" class="meta"></div>
+      <div class="toolbar">
+        <div id="chips" class="chips"></div>
+        <label><input type="checkbox" id="hideOk"> AI確認OK の行を隠す</label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th><th>重大度</th><th>チェックID</th><th>箇所</th><th>不備の内容</th><th>実装時の扱い</th><th>修正提案</th>
+              <th class="edit">修正状態 ✎</th><th class="edit">修正内容 ✎</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="meta">保存すると md がダウンロードされます。spec-reviews フォルダの同名ファイルに上書きしてください。
+        /check-spec で AI が一覧を更新した後は、md を開き直してから編集してください（古い内容で上書きすると AI の更新が消えます）。</p>
+    </section>
+  </main>
+
+  <!-- 解析・作り直しのロジック（.claude/hooks/lib/review-table.mjs と同じ規則） -->
+  <script id="core">
+    const COLUMNS = ["No", "重大度", "チェックID", "箇所", "不備の内容", "実装時の扱い", "修正提案", "修正状態", "修正内容"];
+    const STATUSES = ["未修正", "修正済AI未確認", "AI確認NG", "AI確認OK"];
+    const USER_STATUSES = ["未修正", "修正済AI未確認"];
+    const COL_STATUS = COLUMNS.indexOf("修正状態");
+    const COL_CONTENT = COLUMNS.indexOf("修正内容");
+
+    function splitRow(line) {
+      let s = line.trim();
+      if (s.startsWith("|")) s = s.slice(1);
+      if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+      return s.split(/(?<!\\)\|/).map((c) => c.trim());
+    }
+    function joinRow(cells) {
+      return "| " + cells.join(" | ") + " |";
+    }
+    // Markdown セル → 表示用テキスト
+    function decodeCell(s) {
+      return s.replace(/<br\s*\/?>/gi, "\n").replace(/\\\|/g, "|");
+    }
+    // 入力テキスト → Markdown セル
+    function encodeCell(s) {
+      return s.replace(/\r\n?/g, "\n").trim().replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+    }
+
+    // 一覧表と表の外の情報を読み取る
+    function parseReview(text) {
+      const lines = text.split(/\r?\n/);
+      const hi = lines.findIndex((l) => /^\s*\|/.test(l) && splitRow(l)[0] === "No" && splitRow(l).includes("修正状態"));
+      const meta = lines
+        .filter((l) => /^- (対象仕様書|最終チェック|集計|実装可否)：/.test(l))
+        .map((l) => l.slice(2).replace(/\[([^\]]+)\]\([^)]*\)/g, "$1"));
+      if (hi < 0) return { header: null, rows: [], meta };
+      const header = splitRow(lines[hi]);
+      const rows = [];
+      for (let i = hi + 2; i < lines.length && /^\s*\|/.test(lines[i]); i++) {
+        const cells = splitRow(lines[i]);
+        while (cells.length < header.length) cells.push("");
+        rows.push({ lineIndex: i, cells, no: cells[0] });
+      }
+      return { header, rows, meta };
+    }
+
+    // 読み込んだ内容をもとに、変更した行の「修正状態」「修正内容」だけを書き換えた md を作る。
+    // changes: [{ no, origStatus, origContent(セルの生文字列), status, content(入力テキスト) }]
+    function applyChanges(text, changes) {
+      const eol = text.includes("\r\n") ? "\r\n" : "\n";
+      const lines = text.split(/\r?\n/);
+      const table = parseReview(text);
+      if (!table.header || table.header.join("|") !== COLUMNS.join("|")) {
+        throw new Error("一覧表の列構成が想定と違うため保存できません。");
+      }
+      const saved = [], conflicts = [], missing = [];
+      for (const ch of changes) {
+        const row = table.rows.find((r) => r.no === ch.no);
+        if (!row) { missing.push(ch.no); continue; }
+        // 確定済み（AI確認OK）の行、元の値と食い違う行は変えない
+        if (row.cells[COL_STATUS] !== ch.origStatus || row.cells[COL_CONTENT] !== ch.origContent || row.cells[COL_STATUS] === "AI確認OK") {
+          conflicts.push(ch.no); continue;
+        }
+        // ユーザーが設定できる修正状態は 未修正／修正済AI未確認 のみ
+        if (ch.status !== ch.origStatus && !USER_STATUSES.includes(ch.status)) {
+          conflicts.push(ch.no); continue;
+        }
+        const cells = row.cells.slice();
+        cells[COL_STATUS] = ch.status;
+        cells[COL_CONTENT] = encodeCell(ch.content);
+        lines[row.lineIndex] = joinRow(cells);
+        saved.push(ch.no);
+      }
+      return { text: lines.join(eol), saved, conflicts, missing };
+    }
+  </script>
+
+  <!-- 画面 -->
+  <script>
+    const $ = (id) => document.getElementById(id);
+    // files: ファイル名 → 読み込んだ md の内容
+    const state = { files: new Map(), current: null, parsed: null, edits: new Map() };
+
+    function message(text, kind = "") {
+      $("message").textContent = text;
+      $("message").className = kind;
+    }
+    function showStatus(text, isError = false) {
+      $("status").hidden = !text;
+      $("status").textContent = text;
+      $("status").className = isError ? "notice error" : "notice";
+    }
+    const dirtyCount = () => [...state.edits.values()].filter((e) => e.dirty).length;
+    const confirmDiscard = () => dirtyCount() === 0 || confirm(`未保存の変更が ${dirtyCount()} 件あります。破棄しますか？`);
+
+    // ---- 読み込み（ファイル選択・ドラッグ＆ドロップ） ----
+    async function loadFiles(fileList) {
+      if (!confirmDiscard()) return;
+      const loaded = [], skipped = [];
+      for (const file of fileList) {
+        const text = await file.text();
+        if (file.name.endsWith(".md") && !file.name.startsWith("_") && parseReview(text).header) {
+          state.files.set(file.name, text);
+          loaded.push(file.name);
+        } else {
+          skipped.push(file.name);
+        }
+      }
+      if (loaded.length === 0) {
+        showStatus(`確認一覧として読み込めるファイルがありませんでした（${skipped.join("、")}）。spec-reviews フォルダの SCR-xx_xxx.md を選んでください。`, true);
+        return;
+      }
+      $("intro").hidden = true;
+      showStatus(`${loaded.join("、")} を読み込みました。` + (skipped.length ? `（確認一覧ではないため除外：${skipped.join("、")}）` : ""));
+      openFile(loaded[0]);
+    }
+
+    function openFile(name) {
+      state.current = name;
+      state.parsed = parseReview(state.files.get(name));
+      state.edits = new Map();
+      message("");
+      renderTabs();
+      renderView();
+    }
+
+    // ---- 描画 ----
+    function renderTabs() {
+      const names = [...state.files.keys()].sort();
+      $("tabs").replaceChildren(...names.map((name) => {
+        const b = document.createElement("button");
+        b.textContent = name.replace(/\.md$/, "");
+        b.className = name === state.current ? "active" : "";
+        b.addEventListener("click", () => { if (name !== state.current && confirmDiscard()) openFile(name); });
+        return b;
+      }));
+    }
+
+    function sevBadge(sev) {
+      const s = sev.replaceAll("*", "").trim();
+      const span = document.createElement("span");
+      span.className = `sev ${s === "エラー" ? "err" : s === "警告" ? "warn" : "info"}`;
+      span.textContent = s;
+      return span;
+    }
+
+    function textCell(value, cls = "") {
+      const td = document.createElement("td");
+      td.className = cls;
+      td.textContent = decodeCell(value);
+      return td;
+    }
+
+    function renderView() {
+      $("view").hidden = false;
+      $("meta").replaceChildren(...state.parsed.meta.map((m) => Object.assign(document.createElement("span"), { textContent: m })));
+      const tbody = $("rows");
+      tbody.replaceChildren();
+      for (const row of state.parsed.rows) {
+        const origStatus = row.cells[COL_STATUS];
+        const origContent = row.cells[COL_CONTENT];
+        const locked = origStatus === "AI確認OK";
+        const tr = document.createElement("tr");
+        tr.dataset.status = origStatus;
+        if (locked) tr.classList.add("locked");
+
+        const sevTd = document.createElement("td");
+        sevTd.className = "small";
+        sevTd.append(sevBadge(row.cells[1]));
+        const proposal = textCell(row.cells[6]);
+        if (row.cells[6].startsWith("【NG】")) proposal.classList.add("ng-proposal");
+        tr.append(textCell(row.cells[0], "no"), sevTd, textCell(row.cells[2], "small"), textCell(row.cells[3]), textCell(row.cells[4]), textCell(row.cells[5]), proposal);
+
+        // 修正状態（コンボボックス）：ユーザーが選べるのは 未修正／修正済AI未確認 だけ
+        const select = document.createElement("select");
+        const options = USER_STATUSES.includes(origStatus) ? USER_STATUSES : [origStatus, ...USER_STATUSES];
+        for (const s of options) {
+          select.append(Object.assign(document.createElement("option"), {
+            value: s, textContent: USER_STATUSES.includes(s) ? s : `${s}（AIが設定）`,
+          }));
+        }
+        select.value = origStatus;
+        select.disabled = locked;
+        select.className = origStatus === "AI確認OK" ? "status-ok" : origStatus === "AI確認NG" ? "status-ng" : "";
+        const statusTd = document.createElement("td");
+        statusTd.className = "edit-status";
+        statusTd.append(select);
+
+        // 修正内容（テキスト）
+        const textarea = document.createElement("textarea");
+        textarea.value = decodeCell(origContent);
+        textarea.disabled = locked;
+        textarea.placeholder = locked ? "" : "修正提案を参考に、仕様書の補足・修正内容を入力";
+        const contentTd = document.createElement("td");
+        contentTd.className = "edit-content";
+        contentTd.append(textarea);
+
+        const update = () => {
+          const dirty = select.value !== origStatus || textarea.value !== decodeCell(origContent);
+          state.edits.set(row.no, { no: row.no, origStatus, origContent, status: select.value, content: textarea.value, dirty });
+          tr.classList.toggle("dirty", dirty);
+          tr.dataset.status = select.value;
+          refreshSummary();
+        };
+        textarea.addEventListener("input", () => {
+          // 修正内容を書いたら「修正済AI未確認」にする
+          if (textarea.value.trim() !== "" && textarea.value !== decodeCell(origContent)) select.value = "修正済AI未確認";
+          update();
+        });
+        select.addEventListener("change", update);
+
+        tr.append(statusTd, contentTd);
+        tbody.append(tr);
+      }
+      applyFilter();
+      refreshSummary();
+    }
+
+    function refreshSummary() {
+      const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
+      for (const tr of $("rows").children) counts[tr.dataset.status] = (counts[tr.dataset.status] ?? 0) + 1;
+      const errorsLeft = state.parsed.rows.filter((r) => r.cells[1].replaceAll("*", "").trim() === "エラー" && r.cells[COL_STATUS] !== "AI確認OK").length;
+      const chips = STATUSES.map((s) => Object.assign(document.createElement("span"), { className: "chip", textContent: `${s}：${counts[s]}` }));
+      chips.push(Object.assign(document.createElement("span"), {
+        className: "chip",
+        textContent: errorsLeft ? `未確定のエラー：${errorsLeft} 件` : "エラーはすべて AI確認OK",
+        style: errorsLeft ? "background:var(--err-bg);color:var(--err)" : "background:var(--ok-bg);color:var(--ok)",
+      }));
+      $("chips").replaceChildren(...chips);
+      const n = dirtyCount();
+      $("save").disabled = n === 0;
+      $("save").textContent = n ? `保存（ダウンロード・${n} 件）` : "保存（ダウンロード）";
+    }
+
+    function applyFilter() {
+      const hide = $("hideOk").checked;
+      for (const tr of $("rows").children) tr.classList.toggle("hidden", hide && tr.classList.contains("locked"));
+    }
+
+    // ---- 保存（md を作り直してダウンロード） ----
+    function save() {
+      const changes = [...state.edits.values()].filter((e) => e.dirty);
+      if (!changes.length) return;
+      try {
+        const result = applyChanges(state.files.get(state.current), changes);
+        if (result.saved.length) {
+          const blob = new Blob([result.text], { type: "text/markdown;charset=utf-8" });
+          const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: state.current });
+          document.body.append(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+          state.files.set(state.current, result.text); // 続けて編集できるよう、作り直した内容を表示に反映
+        }
+        const name = state.current;
+        openFile(name);
+        const notes = [];
+        if (result.saved.length) notes.push(`${name} をダウンロードしました（No.${result.saved.join(", ")}）。spec-reviews フォルダの同名ファイルに上書きしてから /check-spec を実行してください。`);
+        if (result.conflicts.length || result.missing.length) notes.push(`No.${[...result.conflicts, ...result.missing].join(", ")} は保存できませんでした。`);
+        message(notes.join(" "), result.conflicts.length || result.missing.length ? "err" : "ok");
+      } catch (e) {
+        message(`保存できませんでした：${e.message}`, "err");
+      }
+    }
+
+    // ---- イベント ----
+    $("fileInput").addEventListener("change", (e) => { loadFiles([...e.target.files]); e.target.value = ""; });
+    $("save").addEventListener("click", save);
+    $("hideOk").addEventListener("change", applyFilter);
+    window.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+    window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+    window.addEventListener("drop", (e) => {
+      e.preventDefault();
+      document.body.classList.remove("dragging");
+      if (e.dataTransfer?.files?.length) loadFiles([...e.dataTransfer.files]);
+    });
+    window.addEventListener("beforeunload", (e) => { if (dirtyCount()) e.preventDefault(); });
+  </script>
+</body>
+</html>
